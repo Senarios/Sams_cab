@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>978311598679-oulh9elr58amd7mhb84plllc4eorufiq.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.978311598679-oulh9elr58amd7mhb84plllc4eorufiq</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>978311598679-47ia0ehqm458g5mr3o5ij59f3ri6cq7f.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDl3WV50DkvLjn0ffs1qzfY4WxWSxpnp1o</string>
+	<key>GCM_SENDER_ID</key>
+	<string>978311598679</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.maniaco.samsapp</string>
+	<key>PROJECT_ID</key>
+	<string>samwilldoit-cdd44</string>
+	<key>STORAGE_BUCKET</key>
+	<string>samwilldoit-cdd44.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:978311598679:ios:d6c07c896276b734d4c912</string>
+	<key>DATABASE_URL</key>
+	<string>https://samwilldoit-cdd44.firebaseio.com</string>
+</dict>
+</plist>

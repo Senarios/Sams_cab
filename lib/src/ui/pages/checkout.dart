@@ -1,0 +1,486 @@
+import 'dart:io';
+import 'dart:math';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:sam_rider_app/src/blocs/data_bloc.dart';
+import 'package:sam_rider_app/src/service/payment_service.dart';
+import 'package:sam_rider_app/src/ui/pages/your_current_trip.dart';
+import 'package:sam_rider_app/src/ui/widgets/loading_dialog.dart';
+import 'package:sam_rider_app/src/util/globals.dart';
+import 'package:sam_rider_app/src/util/utils.dart';
+import 'package:credit_card_input_form/credit_card_input_form.dart';
+import 'package:stripe_payment/stripe_payment.dart';
+
+import 'dart:core';
+
+class CheckoutPage extends StatefulWidget {
+  @override
+  _CheckoutPageState createState() => _CheckoutPageState();
+}
+
+class _CheckoutPageState extends State<CheckoutPage> {
+  dynamic data;
+  DataBloc dataBloc = DataBloc();
+  double price = 0;
+  Token _paymentToken;
+  PaymentMethod paymentMethod;
+  GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
+  String _error;
+  String rideDetails;
+  List<File> _images = List<File>.empty(growable: true);
+  double deviceHeight;
+  final picker = ImagePicker();
+  var distance;
+  var cardInformation;
+  var userImg;
+
+  //var publishableKey = "pk_live_51Hti88BEXyg0kPLy9gBfD4SjNZn860IGsafOdvEmnPmeuwQUQwhiXqDFGXN7NIeI3LItwWzbV6tuXyp90gJHtUBv00VUrNEItR";
+  var clientSecret;
+
+  //Test Key
+  var publishableKey =
+      "pk_test_51Hti88BEXyg0kPLyuSSuAzmzTkPWfWfh83GEvXBC27nRN1NweUI6HNKESkLTbq1HA9iPqVMYcPLwMTUuw2kzqp3J005Du7q6dH";
+  var secretKey =
+      "sk_test_51Hti88BEXyg0kPLywO3GHoaVqnGwhH9M7R1p1egxjObRviUItKKxi6kNS4bt1od2WEtGYagMr9L57S3Ep9UHoRkl00X984phiA";
+
+  @override
+  void initState() {
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+    super.initState();
+    price = (Globals.isSelfLoading
+        ? 0 + Globals.carPrices[Globals.carSize.index]
+        : Globals.weightPrices[Globals.weight.index] +
+        Globals.carPrices[Globals.carSize.index])
+        .toDouble();
+    distance = dp(getDistance(), 2);
+    if (distance < 5) distance = 5;
+    print(distance);
+
+    price += distance;
+    print(price);
+
+    StripePayment.setOptions(StripeOptions(
+        publishableKey: publishableKey,
+        merchantId:
+        //    "SAM_rider${FirebaseAuth.instance.currentUser.uid}"
+        "Test", //YOUR_MERCHANT_ID
+        androidPayMode: 'test')); //production
+  }
+
+  double dp(double val, int places) {
+    double mod = pow(10.0, places);
+    return ((val * mod).round().toDouble() / mod);
+  }
+
+  double getDistance() {
+    if (Globals.path.length < 2) {
+      return Globals.getDistanceFromLatLonInMi(
+          Globals.fromLocation.latLng.latitude,
+          Globals.fromLocation.latLng.longitude,
+          Globals.toLocation.latLng.latitude,
+          Globals.toLocation.latLng.longitude);
+    }
+    var distance = 0.0;
+    for (int i = 0; i < Globals.path.length - 1; i++) {
+      distance += Globals.getDistanceFromLatLonInMi(
+          Globals.path[i].latitude,
+          Globals.path[i].longitude,
+          Globals.path[i + 1].latitude,
+          Globals.path[i + 1].longitude);
+    }
+    return distance;
+  }
+
+  final nameController = TextEditingController();
+  final Map<String, String> customCaptions = {
+    'PREV': 'Prev',
+    'NEXT': 'Next',
+    'DONE': 'Done',
+    'CARD_NUMBER': 'Card Number',
+    'CARDHOLDER_NAME': 'Cardholder Name',
+    'VALID_THRU': 'Valid Thru',
+    'SECURITY_CODE_CVC': 'Security Code (CVC)',
+    'NAME_SURNAME': 'Name Surname',
+    'MM_YY': 'MM/YY',
+    'RESET': 'Reset',
+  };
+
+  final buttonStyle = BoxDecoration(
+    borderRadius: BorderRadius.circular(30.0),
+    gradient: LinearGradient(
+        colors: [
+          const Color(0xfffcdf8a),
+          const Color(0xfff38381),
+        ],
+        begin: const FractionalOffset(0.0, 0.0),
+        end: const FractionalOffset(1.0, 0.0),
+        stops: [0.0, 1.0],
+        tileMode: TileMode.clamp),
+  );
+
+  final cardDecoration = BoxDecoration(
+      boxShadow: <BoxShadow>[
+        BoxShadow(color: Colors.black54, blurRadius: 15.0, offset: Offset(0, 8))
+      ],
+      gradient: LinearGradient(
+          colors: [
+            Colors.red,
+            Colors.blue,
+          ],
+          begin: const FractionalOffset(0.0, 0.0),
+          end: const FractionalOffset(1.0, 0.0),
+          stops: [0.0, 1.0],
+          tileMode: TileMode.clamp),
+      borderRadius: BorderRadius.all(Radius.circular(15)));
+
+  final buttonTextStyle =
+  TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18);
+
+  Future<void> paymentCardForm() async {
+    try {
+      paymentMethod = await StripePayment.paymentRequestWithCardForm(
+          CardFormPaymentRequest());
+
+      confirmPayment();
+    } catch (error) {
+      if (error != null && error.message != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('${error.message}')));
+      }
+    }
+  }
+
+  confirmPayment() async {
+    try {
+
+      var stripePaymentIntent = await PaymentService.createPaymentIntent(price);
+      print("paymentMethod ID "+paymentMethod.id);
+      var val = await StripePayment.confirmPaymentIntent(
+        PaymentIntent(
+            clientSecret: stripePaymentIntent['client_secret'],
+            paymentMethodId: paymentMethod.id),
+      );
+
+      if (val.status == "succeeded") {
+        onMakeRequest(val.paymentIntentId);
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Thank you! payment is done successfully")));
+      } else {
+        return;
+      }
+    } catch (error) {
+      if (error != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.toString())));
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error is null')));
+      }
+    }
+  }
+
+  void onMakeRequest(paymentId) {
+    // getDriverImage();
+
+    data["weight"] = Globals.weight.index;
+    data["car_size"] = Globals.carSize.index;
+    data["stripe_id"] = paymentId;
+    var pathStr = "";
+    Globals.path.forEach((element) {
+      pathStr += "${element.latitude},${element.longitude},";
+    });
+    data["path"] = pathStr;
+    data["price"] = price;
+    data["client_id"] = FirebaseAuth.instance.currentUser.uid;
+    data["status"] = "accepted";
+    data["from_lat"] = Globals.fromLocation.latLng.latitude;
+    data["from_lon"] = Globals.fromLocation.latLng.longitude;
+    data["to_lat"] = Globals.toLocation.latLng.latitude;
+    data["to_lon"] = Globals.toLocation.latLng.longitude;
+    data["rider_notes"] = rideDetails;
+    LoadgingDialog.showLoadingDialog(context, "Loading...");
+    dataBloc.makeOrder(data,_images, () {
+      print("completion");
+      LoadgingDialog.hideLoadingDialog(context);
+      Globals.isWaiting = true;
+
+      Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (context) =>
+                  YourCurrentTripPage(
+                    data: data,
+                  )));
+
+      // Navigator.push(
+      //     context,
+      //     MaterialPageRoute(
+      //         builder: (context) => Chat(
+      //               peerId: data["driver_id"],
+      //               peerAvatar: data["profile"],
+      //             )));
+      // Navigator.popUntil(context, ModalRoute.withName('/joblocation'));
+    }, (error) {
+      LoadgingDialog.hideLoadingDialog(context);
+      print("Order Request Error "+error.toString());
+      AlertDialog(
+        title: Text("Order Request Error"),
+        content: Text(error),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: Text("Ok"),
+          ),
+        ],
+      );
+    });
+  }
+
+  Future<void> onMakePayment(BuildContext context) async {
+    await paymentCardForm();
+  }
+
+  void setError(dynamic error, BuildContext context) {
+    var err = Text(error.toString());
+    _scaffoldKey.currentState.showSnackBar(SnackBar(content: err));
+  }
+
+  // void getDriverImage() async {
+  //
+  //   userImg = await dataBloc.getProfileImage(data["driver_id"]);
+  //
+  //   // final user = FirebaseAuth.instance.currentUser;
+  //   // final ref = FirebaseStorage.instance
+  //   //     .ref()
+  //   //     .child("profile")
+  //   //     .child(user.uid + ".jpg");
+  //   // try {
+  //   //   userImg = (await ref.getDownloadURL()).toString();
+  //   // } catch (e) {
+  //   //   print(e.toString());
+  //   // }
+  //   // setState(() {
+  //   //   print("get image from firebase storage");
+  //   // });
+  // }
+
+  @override
+  Widget build(BuildContext context) {
+    data = ModalRoute
+        .of(context)
+        .settings
+        .arguments;
+    deviceHeight = MediaQuery
+        .of(context)
+        .size
+        .height;
+    return Scaffold(
+        key: _scaffoldKey,
+        // appBar: AppBar(
+        //   backgroundColor: Colors.white70,
+        //   title: Text(
+        //     "Checkout",
+        //     style: TextStyle(color: Colors.black),
+        //   ),
+        //   iconTheme: IconThemeData(color: Colors.black),
+        // ),
+        body: Padding(
+          padding: const EdgeInsets.all(20),
+          child: ListView(children: [
+            Container(
+              height: AppConfig.size(context, 60),
+              width: AppConfig.size(context, 200),
+              decoration: BoxDecoration(
+                image: DecorationImage(
+                  image: AvailableImages.appLogo1,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            Center(
+              child: Text(
+                "Checkout",
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: AppConfig.size(context, 15),
+                  color: AppColors.main,
+                ),
+              ),
+            ),
+            SizedBox(height: 40),
+            Container(
+                color: Color.fromRGBO(201, 237, 211, 1),
+                child: Padding(
+                  padding:
+                  EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                  child: AppStyle.titleLabel(context, "PRICE",
+                      color: AppColors.main),
+                )),
+            SizedBox(height: 8),
+            Container(
+              color: Color.fromRGBO(201, 237, 211, 1),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    AppStyle.titleLabel(context, "LOADING PRICE ",
+                        color: AppColors.main),
+                    AppStyle.titleLabel(context,
+                        "\$${Globals.isSelfLoading ? 0 : Globals
+                            .weightPrices[Globals.weight.index]}",
+                        color: AppColors.main),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
+            Container(
+              color: Color.fromRGBO(201, 237, 211, 1),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    AppStyle.titleLabel(context, "VEHICLE PRICE",
+                        color: AppColors.main),
+                    AppStyle.titleLabel(context,
+                        "\$${Globals.carPrices[Globals.carSize.index]}",
+                        color: AppColors.main),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
+            Container(
+              color: Color.fromRGBO(201, 237, 211, 1),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    AppStyle.titleLabel(context, "DISTANCE PRICE",
+                        color: AppColors.main),
+                    AppStyle.titleLabel(context, "\$$distance",
+                        color: AppColors.main),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
+            Container(
+              color: AppColors.main,
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    AppStyle.titleLabel(context, "TOTAL", color: Colors.white),
+                    AppStyle.titleLabel(context, "\$$price",
+                        color: Colors.white),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            Container(
+                color: Colors.black,
+                child: Padding(
+                  padding:
+                  EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                  child: AppStyle.titleLabel(context, "PROJECT NAME",
+                      color: Colors.white),
+                )),
+            SizedBox(height: 8),
+            Container(
+              height: AppConfig.size(context, 44),
+              child: TextField(
+                controller: nameController,
+                maxLength: 300,
+                maxLines: 10,
+                style: TextStyle(color: Colors.black),
+                decoration: InputDecoration(
+                  hintText: "Details / Special Instructions",
+                  filled: true,
+                  fillColor: Colors.grey[400],
+                ),
+                onChanged: (text) {
+                  rideDetails = text;
+                },
+              ),
+            ),
+            AppStyle.label(
+                context, "Characters left: ${300 - nameController.text.length}",
+                size: 6),
+            SizedBox(
+              height: AppConfig.size(context, 8),
+            ),
+            _images.length != 0 ?
+            Container(
+              height: deviceHeight * 0.2,
+              child: ListView.builder(
+                itemCount: _images.length,
+                itemBuilder: (BuildContext context, int index) {
+                  return Padding(
+                    padding: const EdgeInsets.all(3.0),
+                    child: Image.file(_images[index]),
+                  );
+                },
+                shrinkWrap: true,
+                scrollDirection: Axis.horizontal,
+              ),
+            ):Container(),
+            AppStyle.button(context, "Upload Image", onPressed: () {
+              uploadPicture();
+            }),
+            // AppStyle.titleLabel(context, "Billing Info:"),
+            // SizedBox(height: 5),
+            // CreditCardInputForm(
+            //   showResetButton: true,
+            //   onStateChange: (currentState, cardInfo) {
+            //     print(currentState);
+            //     cardInformation = cardInfo;
+            //   },
+            //   customCaptions: customCaptions,
+            //   // cardCVV: '222',
+            //   // cardName: 'Jeongtae Kim',
+            //   // cardNumber: '1111111111111111',
+            //   // cardValid: '12/12',
+            //   intialCardState: InputState.DONE,
+            //   frontCardDecoration: cardDecoration,
+            //   backCardDecoration: cardDecoration,
+            //   prevButtonDecoration: buttonStyle,
+            //   nextButtonDecoration: buttonStyle,
+            //   prevButtonTextStyle: buttonTextStyle,
+            //   nextButtonTextStyle: buttonTextStyle,
+            //   resetButtonTextStyle: buttonTextStyle,
+            // ),
+            AppStyle.button(context, "Order", onPressed: () {
+              Globals.isSelfLoading = false;
+              //onMakeRequest("test123");
+              onMakePayment(context);
+            }),
+          ]),
+        ));
+  }
+
+  Future<void> uploadPicture() async {
+    final pickedFile = await picker.getImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _images.add(File(pickedFile.path));
+      });
+    } else {
+      print('No image selected.');
+    }
+  }
+}
